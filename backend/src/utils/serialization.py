@@ -9,3 +9,9 @@ def report_dict(r):
     return {k:getattr(r,k) for k in ['id','name','job_id','destination','interval_seconds','next_run','enabled']}
 def delivery_dict(d):
     return {k:getattr(d,k) for k in ['id','report_id','created_at','checksum','filename','destination']}
+def voucher_dict(v):
+    return {k:getattr(v,k) for k in ['id','part','occur_date','posted_at','demand','version','entry_type','corrected_id','source','created_at']}
+def replay_run_dict(r):
+    return {k:getattr(r,k) for k in ['id','name','params','manifest','status','progress','result','error','archive_path','created_at','finished_at']}
+def replay_point_dict(p):
+    return {k:getattr(p,k) for k in ['id','run_id','meeting_epoch','idempotency_key','payload','archive_path','created_at']}

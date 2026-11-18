@@ -4,7 +4,7 @@
 
 ## 模块与业务流程
 数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
-三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。
+三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。时点回放扩展实体：Voucher 领用凭证（发生日/入账时间/更正版本）、ReplayRun 回放运行（固化清单与恢复进度）、ReplayPoint 会议点幂等归档。
 
 ## 快速启动
 ```bash
@@ -38,6 +38,14 @@ COMPOSE_PROJECT_NAME=spare-croston；FRONTEND_PORT=18214；BACKEND_PORT=19214；
 
 ## 数据与验收
 所有数据为固定随机种子生成的模拟业务数据，不能作为实际生产决策证据。项目独立算法、输入边界及业务局限详见 BUSINESS.md。测试与截图统一存放 ../../test-artifacts/gb-1015/，源码不含日志/截图/测试报告。
+本仓库内附 `test-artifacts/gb-1015/tests/`，时点回放与分析契约的纯标准库单元测试可直接运行：
+```bash
+python3 -m unittest discover -s test-artifacts/gb-1015/tests -p 'test_*.py'
+```
+## 时点回放接口（/api/replay）
+- `GET/POST /replay/vouchers`：凭证台账与登记（analyst/admin 可写，viewer 只读）。
+- `GET /replay/runs`、`POST /replay/runs`、`GET /replay/runs/{id}`：按会议时点发起回放，清单在创建时固化，worker 中断后按清单恢复、按幂等键归档。
+- `POST /replay/compare`：工作台即时对照会议当时预测与现有凭证回算，返回差异凭证及归因。
 清理本项目演示数据：`docker compose down -v --remove-orphans`（会删除本项目命名卷）。
 
 ## License

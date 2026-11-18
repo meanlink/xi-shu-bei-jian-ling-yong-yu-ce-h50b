@@ -4,6 +4,8 @@ import math
 import random
 import statistics
 
+from src.services.engine import croston_rate, baseline_mean, number, validate_params
+
 
 def metadata():
     return {
@@ -11,10 +13,10 @@ def metadata():
         "tagline": "把零散领用转换成可回测的周度备件协同依据",
         "client": "模拟客户：江湾精机维保组，18 名技师维护 76 台数控机床。",
         "workflow": "技师每晚汇总领用单，计划员在周五用最近七天均值估计下周领用量，再邮件给采购。",
-        "pains": ["连续零领用让均值误判需求消失", "一次集中检修拉高短期均值", "预测结果缺少历史回测和参数留痕"],
+        "pains": ["连续零领用让均值误判需求消失", "一次集中检修拉高短期均值", "预测结果缺少历史回测和参数留痕", "领用补记晚入账，例会复盘容易把后来才知道的数算进预测"],
         "upstream": "ERP 导出的 180 天备件领用日历（包含零需求日）",
         "downstream": "周度维保备料协同会；输出预测用于人工判断，不生成采购单。",
-        "entities": ["领用日历", "预测试算", "周度分发计划"],
+        "entities": ["领用日历", "预测试算", "周度分发计划", "领用凭证与时点回放"],
         "dataset_name": "江湾精机_2026Q3_稀疏领用.csv",
         "columns": [{"key": "day", "label": "领用日", "type": "string"}, {"key": "part", "label": "备件编码", "type": "string"}, {"key": "demand", "label": "领用件数", "type": "number"}],
         "parameters": [
@@ -27,7 +29,7 @@ def metadata():
         "accent": "oklch(54% 0.12 65)", "style": "parts-ledger",
         "seed_story": ["08:30 上传江湾精机_2026Q3_稀疏领用.csv，共 360 行。", "08:40 校验 R17 与 G22 各 180 天日历，零领用日也保留。", "09:00 选择 R17、α=0.2 和 SBA 校正。", "09:10 运行 14 天预测并查看末 28 天逐日回测。", "09:20 比较原始 Croston 与 SBA 的日均预测差异。", "10:00 将累计领用估计提交维保例会，检查停机检修安排。", "16:00 为维保组设置本地收件箱分发计划，归档参数和结果。"],
         "method": "Croston 对非零需求量和需求间隔分别指数平滑，SBA 乘以 (1−α/2)。末 28 天做严格向前滚动一步回测。",
-        "limitations": ["预测是假设未来领用过程稳定时的期望值，不是安全库存或服务水平承诺。", "无采购提前期、库存余额和停机计划输入，不输出补货指令。"],
+        "limitations": ["预测是假设未来领用过程稳定时的期望值，不是安全库存或服务水平承诺。", "无采购提前期、库存余额和停机计划输入，不输出补货指令。", "例会复盘只采信会议时点前已入账的凭证版本；补录与更正按入账时间留痕，不回灌进历史预测。"],
     }
 
 
@@ -44,43 +46,15 @@ def seed_records():
     return result
 
 
-def _number(value, name, low, high):
-    try:
-        answer = float(value)
-    except (ValueError, TypeError):
-        raise ValueError(f"{name}必须是数值") from None
-    if not math.isfinite(answer) or not low <= answer <= high:
-        raise ValueError(f"{name}必须在 {low} 至 {high} 之间")
-    return answer
-
-
 def _rate(values, alpha, sba):
-    nonzero = [index for index, value in enumerate(values) if value > 0]
-    if not nonzero:
-        return 0.0
-    first = nonzero[0]
-    size = float(values[first])
-    gap = float(first + 1)
-    last = first
-    for index in nonzero[1:]:
-        size += alpha * (values[index] - size)
-        gap += alpha * ((index - last) - gap)
-        last = index
-    return size / gap * (1 - alpha / 2 if sba else 1)
+    return croston_rate(values, alpha, sba)
 
 
 def analyze(records, params):
     if not isinstance(records, list) or not records:
         raise ValueError("请导入包含零需求日的领用日历")
     part = str(params.get("part", "R17"))
-    alpha = _number(params.get("alpha", 0.2), "α", 0.05, 0.8)
-    horizon_value = _number(params.get("horizon", 14), "预测天数", 3, 45)
-    if not horizon_value.is_integer():
-        raise ValueError("预测天数必须是整数")
-    horizon = int(horizon_value)
-    variant = params.get("variant", "sba")
-    if variant not in ("sba", "croston"):
-        raise ValueError("未知的 Croston 变体")
+    alpha, horizon, variant = validate_params(params)
     rows = []
     for record in records:
         if str(record.get("part")) != part:
@@ -102,12 +76,12 @@ def analyze(records, params):
     fitted = []
     baseline = []
     for index in range(len(values) - 28, len(values)):
-        fitted.append(_rate(values[:index], alpha, variant == "sba"))
-        baseline.append(statistics.mean(values[:index]))
+        fitted.append(croston_rate(values[:index], alpha, variant == "sba"))
+        baseline.append(baseline_mean(values[:index]))
     actual = values[-28:]
     mae = statistics.mean(abs(a - b) for a, b in zip(actual, fitted))
     baseline_mae = statistics.mean(abs(a - b) for a, b in zip(actual, baseline))
-    rate = _rate(values, alpha, variant == "sba")
+    rate = croston_rate(values, alpha, variant == "sba")
     nonzero_count = sum(value > 0 for value in values)
     if rows[-1][0].toordinal() + horizon > date.max.toordinal():
         raise ValueError("预测末日超出日历支持范围，请检查最后观测日期")
